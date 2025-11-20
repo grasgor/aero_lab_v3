@@ -9,9 +9,10 @@ interface SceneProps {
   params: AirfoilParams;
   setParams?: React.Dispatch<React.SetStateAction<AirfoilParams>>;
   onDragStart?: () => void;
+  onDeletePoint?: (index: number) => void;
 }
 
-const Scene: React.FC<SceneProps> = ({ params, setParams, onDragStart }) => {
+const Scene: React.FC<SceneProps> = ({ params, setParams, onDragStart, onDeletePoint }) => {
   const [orbitEnabled, setOrbitEnabled] = useState(true);
 
   // Determine if flow should be paused/hidden
@@ -46,6 +47,7 @@ const Scene: React.FC<SceneProps> = ({ params, setParams, onDragStart }) => {
           setParams={setParams} 
           setOrbitEnabled={setOrbitEnabled}
           onDragStart={onDragStart}
+          onDeletePoint={onDeletePoint}
         />
         <FlowParticles 
           angle={params.angle} 

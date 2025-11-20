@@ -80,25 +80,8 @@ declare global {
       sphereGeometry: any;
       spotLight: any;
       primitive: any;
-    }
-  }
-}
-
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      ambientLight: any;
-      boxGeometry: any;
-      group: any;
-      instancedMesh: any;
-      mesh: any;
-      meshBasicMaterial: any;
-      meshPhysicalMaterial: any;
-      meshStandardMaterial: any;
-      planeGeometry: any;
-      sphereGeometry: any;
-      spotLight: any;
-      primitive: any;
+      // Fallback for standard HTML elements (div, span, etc.)
+      [elemName: string]: any;
     }
   }
 }

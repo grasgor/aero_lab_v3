@@ -10,6 +10,9 @@ interface ControlsProps {
   onReset?: () => void;
   canUndo?: boolean;
   saveHistory?: () => void;
+  // New Mesh Props
+  onSubdivide?: () => void;
+  onSmooth?: () => void;
 }
 
 interface SliderProps {
@@ -143,7 +146,7 @@ const AiProviderControl: React.FC<{ params: AirfoilParams; updateParam: (k: keyo
 );
 
 
-const Controls: React.FC<ControlsProps> = ({ params, setParams, onUndo, onReset, canUndo, saveHistory }) => {
+const Controls: React.FC<ControlsProps> = ({ params, setParams, onUndo, onReset, canUndo, saveHistory, onSubdivide, onSmooth }) => {
   const [analysis, setAnalysis] = useState<AnalysisResult>({ 
     loading: false, 
     error: undefined
@@ -484,8 +487,26 @@ const Controls: React.FC<ControlsProps> = ({ params, setParams, onUndo, onReset,
                                    <span className="text-[9px] text-amber-400/80 font-mono">HIDE FLOW WHILE EDITING</span>
                                </label>
                                
-                               {/* UNDO / RESET BUTTONS */}
                                <div className="grid grid-cols-2 gap-2 border-t border-amber-900/20 pt-2">
+                                  <button
+                                      onClick={onSubdivide}
+                                      className="py-1 bg-amber-900/30 hover:bg-amber-800/50 border border-amber-700/30 rounded text-[9px] text-amber-300 transition-all"
+                                      title="Add detail (subdivide)"
+                                  >
+                                      SUBDIVIDE
+                                  </button>
+                                  <button
+                                      onClick={onSmooth}
+                                      className="py-1 bg-amber-900/30 hover:bg-amber-800/50 border border-amber-700/30 rounded text-[9px] text-amber-300 transition-all"
+                                      title="Relax shape"
+                                  >
+                                      SMOOTH
+                                  </button>
+                               </div>
+                               <p className="text-[8px] text-amber-700 text-center italic mt-1">Double-click handle to delete point</p>
+
+                               {/* UNDO / RESET BUTTONS */}
+                               <div className="grid grid-cols-2 gap-2 border-t border-amber-900/20 pt-2 mt-2">
                                  <button
                                     onClick={onUndo}
                                     disabled={!canUndo}
@@ -675,24 +696,40 @@ const Controls: React.FC<ControlsProps> = ({ params, setParams, onUndo, onReset,
                   </button>
               </div>
               
-              <div className="flex gap-2">
-                 <select 
-                   value={analysisScenario}
-                   onChange={(e) => setAnalysisScenario(e.target.value)}
-                   className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1 text-[9px] text-slate-300 focus:outline-none focus:border-cyan-500"
-                 >
-                    <option>General Performance</option>
-                    <option>High Downforce Circuit</option>
-                    <option>Low Drag / Top Speed</option>
-                    <option>Efficiency / Eco</option>
-                 </select>
-                 <button
-                    onClick={handleAnalyze}
-                    disabled={analysis.loading}
-                    className="px-3 py-1 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white text-[10px] font-bold rounded shadow-lg shadow-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all whitespace-nowrap"
-                  >
-                    {analysis.loading ? "..." : "Run"}
-                  </button>
+              {/* Custom Analysis Context Input */}
+              <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                     <input 
+                       type="text"
+                       value={analysisScenario}
+                       onChange={(e) => setAnalysisScenario(e.target.value)}
+                       placeholder="Context (e.g. 'Wet track cornering')..."
+                       className="flex-1 bg-slate-900 border border-white/10 rounded px-2 py-1.5 text-[10px] text-slate-300 focus:outline-none focus:border-cyan-500 placeholder-slate-600"
+                     />
+                     <button
+                        onClick={handleAnalyze}
+                        disabled={analysis.loading || !analysisScenario.trim()}
+                        className="px-3 py-1 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-white text-[10px] font-bold rounded shadow-lg shadow-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all whitespace-nowrap flex items-center"
+                      >
+                        {analysis.loading ? "..." : "Run Analysis"}
+                      </button>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1.5">
+                      {["General", "High Downforce", "Top Speed", "Eco"].map(s => (
+                          <button
+                             key={s}
+                             onClick={() => setAnalysisScenario(s === "General" ? "General Performance" : s)}
+                             className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase border transition-all ${
+                                analysisScenario === s || (s === "General" && analysisScenario === "General Performance")
+                                  ? 'bg-cyan-900/50 border-cyan-500 text-cyan-300' 
+                                  : 'bg-slate-900 border-slate-700 text-slate-500 hover:border-slate-500 hover:text-slate-400'
+                             }`}
+                          >
+                             {s}
+                          </button>
+                      ))}
+                  </div>
               </div>
             </div>
             

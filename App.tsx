@@ -4,10 +4,6 @@ import Controls from './components/Controls';
 import { AirfoilParams, Point } from './types';
 
 // Default Control Points - High Resolution (12 Points)
-// 0: LE (0,0)
-// 1-5: Upper Surface
-// 6: TE (1,0)
-// 7-11: Lower Surface
 const DEFAULT_POINTS = [
   { x: 0, y: 0 },       // 0: LE
   { x: 0.15, y: 0.06 }, // 1
@@ -28,15 +24,15 @@ const DEFAULT_PARAMS: AirfoilParams = {
   camber: 4,
   position: 4,
   thickness: 14,
-  angle: -10, // Negative angle for downforce
+  angle: -10, 
   posX: 0,
   posY: 0,
   mode: 'naca',
-  isEditing: false, // Default to viewing mode
-  pauseFlowDuringEdit: false, // Keep flow visible by default
-  isFlowActive: true, // Global flow switch on
+  isEditing: false, 
+  pauseFlowDuringEdit: false, 
+  isFlowActive: true, 
   controlPoints: DEFAULT_POINTS,
-  flowType: 'discrete', // Changed default to particles
+  flowType: 'discrete', 
   showVortices: true,
   showWireframe: false,
   showHeatmap: false,
@@ -51,7 +47,6 @@ const App: React.FC = () => {
   const [params, setParams] = useState<AirfoilParams>(DEFAULT_PARAMS);
   const [history, setHistory] = useState<Point[][]>([]);
 
-  // Function to save current state to history (max 20 steps)
   const saveHistory = () => {
     setHistory(prev => {
       const newHistory = [...prev, params.controlPoints];
@@ -60,7 +55,6 @@ const App: React.FC = () => {
     });
   };
 
-  // Triggered before a drag starts in Airfoil.tsx
   const handleDragStart = () => {
     saveHistory();
   };
@@ -73,13 +67,115 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
-    saveHistory(); // Save before reset so it can be undone
+    saveHistory(); 
     setParams(prev => ({ ...prev, controlPoints: DEFAULT_POINTS }));
+  };
+
+  // MESH TOOLS
+  const handleSubdivide = () => {
+    saveHistory();
+    setParams(prev => {
+      const pts = prev.controlPoints;
+      // Identify TE
+      let teIndex = 0;
+      let maxX = -Infinity;
+      pts.forEach((p, i) => { if (p.x > maxX) { maxX = p.x; teIndex = i; } });
+
+      const newPoints: Point[] = [];
+      
+      // Subdivide Upper: 0 to TE
+      for (let i = 0; i < teIndex; i++) {
+        newPoints.push(pts[i]);
+        // Interpolate
+        newPoints.push({
+          x: (pts[i].x + pts[i+1].x) / 2,
+          y: (pts[i].y + pts[i+1].y) / 2
+        });
+      }
+      newPoints.push(pts[teIndex]); // Add TE
+
+      // Subdivide Lower: TE+1 to End
+      // Need to handle the connection logic? The array stores lower points independently.
+      // But visually they connect LE -> Lower -> TE.
+      // In array: [LE, Upper..., TE, LowerStart..., LowerEnd]
+      // The lower surface usually connects LE -> LowerStart and LowerEnd -> TE in visual logic.
+      // Here we just subdivide the existing list of intermediate lower points.
+      if (pts.length > teIndex + 1) {
+         for (let i = teIndex + 1; i < pts.length; i++) {
+            // Look ahead if possible, else just push
+            if (i < pts.length - 1) {
+                newPoints.push(pts[i]);
+                newPoints.push({
+                    x: (pts[i].x + pts[i+1].x) / 2,
+                    y: (pts[i].y + pts[i+1].y) / 2
+                });
+            } else {
+                newPoints.push(pts[i]);
+            }
+         }
+      }
+
+      return { ...prev, controlPoints: newPoints };
+    });
+  };
+
+  const handleSmooth = () => {
+    saveHistory();
+    setParams(prev => {
+      const pts = prev.controlPoints;
+      // Identify TE
+      let teIndex = 0;
+      let maxX = -Infinity;
+      pts.forEach((p, i) => { if (p.x > maxX) { maxX = p.x; teIndex = i; } });
+
+      // Laplacian smooth: p[i] = (p[i-1] + p[i] + p[i+1]) / 3
+      // We pin LE (0) and TE (teIndex)
+      const newPoints = pts.map(p => ({...p}));
+      
+      // Smooth Upper Surface (1 to teIndex - 1)
+      for (let i = 1; i < teIndex; i++) {
+         newPoints[i].x = (pts[i-1].x + pts[i].x + pts[i+1].x) / 3;
+         newPoints[i].y = (pts[i-1].y + pts[i].y + pts[i+1].y) / 3;
+      }
+
+      // Smooth Lower Surface
+      // Lower surface range: teIndex + 1 to end.
+      // To smooth correctly, we need to consider neighbors.
+      // Neighbors of teIndex+1? It connects to LE (0) and teIndex+2.
+      // Neighbors of last point? It connects to TE (teIndex) and last-1.
+      // For simplicity in this array structure, let's just smooth the internal list elements relative to each other
+      // and assume standard array neighbors.
+      for (let i = teIndex + 2; i < pts.length - 1; i++) {
+         newPoints[i].x = (pts[i-1].x + pts[i].x + pts[i+1].x) / 3;
+         newPoints[i].y = (pts[i-1].y + pts[i].y + pts[i+1].y) / 3;
+      }
+      
+      return { ...prev, controlPoints: newPoints };
+    });
+  };
+
+  const handleDeletePoint = (index: number) => {
+      setParams(prev => {
+          const pts = prev.controlPoints;
+          // Prevent deleting LE (0) or TE (max X)
+          let teIndex = 0;
+          let maxX = -Infinity;
+          pts.forEach((p, i) => { if (p.x > maxX) { maxX = p.x; teIndex = i; } });
+
+          if (index === 0 || index === teIndex) {
+              console.warn("Cannot delete Leading Edge or Trailing Edge points.");
+              return prev;
+          }
+          if (pts.length <= 4) return prev; // Min points safety
+
+          saveHistory();
+          const newPoints = pts.filter((_, i) => i !== index);
+          return { ...prev, controlPoints: newPoints };
+      });
   };
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
-      {/* Background Gradient for depth */}
       <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 pointer-events-none" />
       
       <Controls 
@@ -89,15 +185,18 @@ const App: React.FC = () => {
         onReset={handleReset}
         canUndo={history.length > 0}
         saveHistory={saveHistory}
+        // Mesh Tools
+        onSubdivide={handleSubdivide}
+        onSmooth={handleSmooth}
       />
       
       <Scene 
         params={params} 
         setParams={setParams} 
         onDragStart={handleDragStart}
+        onDeletePoint={handleDeletePoint}
       />
       
-      {/* Attribution/Footer */}
       <div className="absolute bottom-4 right-4 text-slate-600 text-xs pointer-events-none select-none z-0 opacity-50">
         {'>'} SYSTEM_READY: Three.js & Gemini 2.5 Flash / Llama.cpp
       </div>

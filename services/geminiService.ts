@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AirfoilParams, AeroStats, Point } from "../types";
+import * as THREE from 'three';
 
 let ai: GoogleGenAI | null = null;
 
@@ -18,11 +19,7 @@ const cleanJsonOutput = (text: string): string => {
   if (match && match[1]) {
     return match[1];
   }
-  // Try to find first { or [ and last } or ]
-  const firstChar = text.search(/[{}\[]/);
-  const lastChar = text.search(/[}\]]/); // Naive find, better to use lastIndexOf
   
-  // Better manual search from ends
   let start = text.indexOf('{');
   if (start === -1) start = text.indexOf('[');
   
@@ -42,7 +39,6 @@ const generatePrompt = (params: AirfoilParams, scenario: string): string => {
   if (mode === 'naca') {
     profileDescription = `NACA ${Math.round(camber)}${Math.round(position)}${Math.round(thickness).toString().padStart(2, '0')}`;
   } else {
-    // Serialize control points for detailed analysis
     const points = params.controlPoints;
     const pointsStr = points.map((p, i) => `P${i}[${p.x.toFixed(2)}, ${p.y.toFixed(2)}]`).join(', ');
     
@@ -50,7 +46,6 @@ const generatePrompt = (params: AirfoilParams, scenario: string): string => {
     const bottomY = Math.min(...points.map(p => p.y));
     const maxThickness = (topY - bottomY);
     
-    // Simple camber estimation (avg of max upper and min lower y)
     const maxUpper = Math.max(...points.map(p => p.y));
     const minLower = Math.min(...points.map(p => p.y));
     const camberEst = (maxUpper + minLower) / 2;
@@ -59,8 +54,7 @@ const generatePrompt = (params: AirfoilParams, scenario: string): string => {
     Geometry Definition (Control Points X,Y): ${pointsStr}
     Approximate Geometric Properties:
     - Max Thickness: ${(maxThickness * 100).toFixed(1)}% of chord
-    - Estimated Camber Offset: ${(camberEst * 100).toFixed(1)}%
-    - Shape Characteristic: Interpret the points to identify features like ducktail, reflexed trailing edge, or gurney flap.`;
+    - Estimated Camber Offset: ${(camberEst * 100).toFixed(1)}%`;
   }
 
   return `
@@ -123,7 +117,6 @@ const analyzeWithLocal = async (params: AirfoilParams, scenario: string): Promis
 
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || data.content || "{}";
-    
     const cleaned = cleanJsonOutput(content);
     return JSON.parse(cleaned) as AeroStats;
 
@@ -154,14 +147,14 @@ export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            downforce: { type: Type.NUMBER, description: "Score 0-10" },
-            drag: { type: Type.NUMBER, description: "Efficiency Score 0-10" },
-            stability: { type: Type.NUMBER, description: "Score 0-10" },
-            liftToDrag: { type: Type.NUMBER, description: "Estimated L/D Ratio" },
-            flowComplexity: { type: Type.NUMBER, description: "Turbulence/Cost Score 0-100" },
+            downforce: { type: Type.NUMBER },
+            drag: { type: Type.NUMBER },
+            stability: { type: Type.NUMBER },
+            liftToDrag: { type: Type.NUMBER },
+            flowComplexity: { type: Type.NUMBER },
             summary: { type: Type.STRING },
             recommendation: { type: Type.STRING },
-            extensiveReport: { type: Type.STRING, description: "Detailed physics analysis" }
+            extensiveReport: { type: Type.STRING }
           },
           required: ["downforce", "drag", "stability", "liftToDrag", "flowComplexity", "summary", "recommendation", "extensiveReport"]
         },
@@ -190,11 +183,6 @@ export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Prom
       - position (0 to 9)
       - thickness (1 to 40)
       - angle (-25 to 15)
-
-      Consider standard NACA 4-digit series physics.
-      
-      Example: For "high downforce", angle might be -15, camber 8.
-      Example: For "low drag", angle might be -2, thickness 10.
 
       Return JSON ONLY. No explanation.
       Format: { "camber": number, "position": number, "thickness": number, "angle": number }
@@ -246,50 +234,47 @@ export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Prom
     return null;
 };
 
-/**
- * Generates a list of points for a custom airfoil shape based on a text description.
- */
 export const generateProfilePoints = async (description: string, params: AirfoilParams): Promise<Point[] | null> => {
     const prompt = `
-      Generate 2D coordinates for a custom car spoiler cross-section described as: "${description}".
+      Generate aerodynamic keypoints for a car spoiler cross-section described as: "${description}".
+      
+      I need separate definitions for the Upper Surface (Suction Side) and Lower Surface (Pressure Side).
       
       Requirements:
-      - Generate exactly 12 points.
-      - Coordinate system: X from 0 (Leading Edge) to 1 (Trailing Edge).
-      - Y range roughly -0.5 to 0.5 (centered at 0).
-      - Structure: 
-        - Point 0: {x:0, y:0} (Leading Edge)
-        - Points 1-5: Upper Surface points moving from X=0.15 to X=0.9
-        - Point 6: {x:1, y:0} (Trailing Edge)
-        - Points 7-11: Lower Surface points moving from X=0.15 to X=0.9
+      - X range is 0.0 (Leading Edge) to 1.0 (Trailing Edge).
+      - Y range is roughly -0.5 to 0.5.
+      - **Upper Surface**: Provide 4-6 key coordinates describing the top curve. Start near X=0, end near X=1.
+      - **Lower Surface**: Provide 4-6 key coordinates describing the bottom curve. Start near X=0, end near X=1.
+      - Do NOT include the exact LE (0,0) or TE (1,y) in these lists if possible, focus on the curvature in between.
       
-      Example structure:
-      [
-        {"x":0, "y":0}, 
-        {"x":0.2, "y":0.1}, {"x":0.4, "y":0.15}, ... 
-        {"x":1, "y":0}, 
-        {"x":0.2, "y":-0.05}, ...
-      ]
+      The system will interpolate these points to create a smooth spline.
 
-      Return valid JSON array of objects with x and y numbers.
+      Return valid JSON object:
+      {
+        "upperSurface": [{"x": number, "y": number}, ...],
+        "lowerSurface": [{"x": number, "y": number}, ...]
+      }
     `;
 
     try {
+        let rawData: { upperSurface: Point[], lowerSurface: Point[] } | null = null;
+
         if (params.aiProvider === 'local') {
              const response = await fetch(params.localEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: [
-                        { role: "system", content: "You are a geometry engine. Output JSON array only." },
+                        { role: "system", content: "You are a geometry engine. Output JSON object with upperSurface and lowerSurface arrays." },
                         { role: "user", content: prompt }
                     ],
                     temperature: 0.5,
+                    response_format: { type: "json_object" }
                 })
             });
             const data = await response.json();
-            const content = cleanJsonOutput(data.choices?.[0]?.message?.content || "[]");
-            return JSON.parse(content);
+            const content = cleanJsonOutput(data.choices?.[0]?.message?.content || "{}");
+            rawData = JSON.parse(content);
         } else {
             if (!ai) return null;
             const response = await ai.models.generateContent({
@@ -298,23 +283,80 @@ export const generateProfilePoints = async (description: string, params: Airfoil
                 config: {
                     responseMimeType: "application/json",
                     responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                x: { type: Type.NUMBER },
-                                y: { type: Type.NUMBER }
+                        type: Type.OBJECT,
+                        properties: {
+                            upperSurface: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER } },
+                                    required: ["x", "y"]
+                                }
                             },
-                            required: ["x", "y"]
-                        }
+                            lowerSurface: {
+                                type: Type.ARRAY,
+                                items: {
+                                    type: Type.OBJECT,
+                                    properties: { x: { type: Type.NUMBER }, y: { type: Type.NUMBER } },
+                                    required: ["x", "y"]
+                                }
+                            }
+                        },
+                        required: ["upperSurface", "lowerSurface"]
                     }
                 }
             });
-            if (response.text) return JSON.parse(response.text);
+            if (response.text) rawData = JSON.parse(response.text);
         }
+
+        if (rawData && rawData.upperSurface && rawData.lowerSurface) {
+            // Interpolation Logic
+            // 1. Create separate spline curves for upper and lower
+            const le = new THREE.Vector2(0, 0);
+            // Determine TE Y from the last points of generated data or default to 0
+            const lastUpper = rawData.upperSurface[rawData.upperSurface.length - 1];
+            const lastLower = rawData.lowerSurface[rawData.lowerSurface.length - 1];
+            const teY = (lastUpper.y + lastLower.y) / 2;
+            const te = new THREE.Vector2(1, teY);
+
+            // Build arrays for SplineCurve
+            const upperVecs = [le, ...rawData.upperSurface.map(p => new THREE.Vector2(p.x, p.y)), te];
+            // For lower surface, typically we want LE -> TE direction for the spline
+            const lowerVecs = [le, ...rawData.lowerSurface.map(p => new THREE.Vector2(p.x, p.y)), te];
+
+            const upperSpline = new THREE.SplineCurve(upperVecs);
+            const lowerSpline = new THREE.SplineCurve(lowerVecs);
+
+            // We need 12 points total to match App defaults.
+            // 0: LE
+            // 1-5: Upper intermediates (5 points)
+            // 6: TE
+            // 7-11: Lower intermediates (5 points)
+
+            const finalPoints: Point[] = [];
+            finalPoints.push({ x: 0, y: 0 }); // Index 0: LE
+
+            // Sample Upper (t=0 is LE, t=1 is TE)
+            for (let i = 1; i <= 5; i++) {
+                const t = i / 6;
+                const p = upperSpline.getPoint(t);
+                finalPoints.push({ x: p.x, y: p.y });
+            }
+
+            finalPoints.push({ x: 1, y: teY }); // Index 6: TE
+
+            // Sample Lower (t=0 is LE, t=1 is TE)
+            for (let i = 1; i <= 5; i++) {
+                const t = i / 6;
+                const p = lowerSpline.getPoint(t);
+                finalPoints.push({ x: p.x, y: p.y });
+            }
+
+            return finalPoints;
+        }
+        return null;
     } catch (e) {
-        console.error("Shape Gen Error:", e);
+        console.error("Shape Generation Error:", e);
         return null;
     }
-    return null;
 };

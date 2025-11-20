@@ -74,26 +74,34 @@ export const generateNACAShape = (
 /**
  * Generates a shape from control points.
  * Supports dynamic number of points.
- * Assumes structure: LE -> Upper Surface Points -> TE -> Lower Surface Points
+ * Auto-detects Trailing Edge (Max X) to split Upper/Lower surfaces.
  */
 export const generateFreeformShape = (controlPoints: Point[]): THREE.Shape => {
   const shape = new THREE.Shape();
 
   if (controlPoints.length < 3) return shape;
 
-  // Dynamically find the Trailing Edge (TE) index.
-  // We assume it's the point roughly in the middle of the array.
-  // Usually LE is 0, TE is ceil(length/2) for equal points top/bottom
-  const teIndex = Math.floor(controlPoints.length / 2);
+  // Dynamically find the Trailing Edge (TE) index based on Geometry (Max X).
+  let teIndex = 0;
+  let maxX = -Infinity;
+  
+  controlPoints.forEach((p, i) => {
+      if (p.x > maxX) {
+          maxX = p.x;
+          teIndex = i;
+      }
+  });
 
+  // LE is assumed to be Index 0 for the Upper Surface start,
+  // and implicitly the anchor for the Lower Surface start.
   const le = new THREE.Vector2(controlPoints[0].x, controlPoints[0].y);
   const te = new THREE.Vector2(controlPoints[teIndex].x, controlPoints[teIndex].y);
 
   // Upper Surface: From LE (0) to TE (teIndex)
   const upperSurfacePoints = controlPoints.slice(0, teIndex + 1).map(p => new THREE.Vector2(p.x, p.y));
   
-  // Lower Surface: From LE (0) -> Intermediates (teIndex+1 to end) -> TE (teIndex)
-  // Note: Control points for lower surface typically move from LE towards TE in X.
+  // Lower Surface: From LE (implicit) -> Intermediates (teIndex+1 to end) -> TE (implicit)
+  // Note: Lower surface points in array are typically ordered LE -> TE
   const lowerIntermediatePoints = controlPoints.slice(teIndex + 1).map(p => new THREE.Vector2(p.x, p.y));
   const lowerSurfacePoints = [le, ...lowerIntermediatePoints, te];
   
@@ -105,7 +113,7 @@ export const generateFreeformShape = (controlPoints: Point[]): THREE.Shape => {
   const lowerSpaced = lowerCurve.getPoints(divisions);
   
   // START DRAWING
-  // Start at TE
+  // Start at TE (end of upper curve)
   shape.moveTo(upperSpaced[upperSpaced.length - 1].x, upperSpaced[upperSpaced.length - 1].y); 
   
   // Draw Upper Surface (backwards from TE to LE)
@@ -114,7 +122,7 @@ export const generateFreeformShape = (controlPoints: Point[]): THREE.Shape => {
   }
   
   // Draw Lower Surface (from LE to TE)
-  // We skip index 0 because it's LE, which we just drew to.
+  // Skip index 0 (LE) as we just drew to it
   for (let i = 1; i < lowerSpaced.length; i++) {
      shape.lineTo(lowerSpaced[i].x, lowerSpaced[i].y);
   }
