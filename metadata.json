@@ -1,0 +1,5 @@
+{
+  "name": "AeroFlow Viz",
+  "description": "Interactive 3D airfoil fluid dynamics visualization using React Three Fiber. Features real-time geometry generation (NACA airfoils) and AI-powered aerodynamic analysis powered by Gemini.",
+  "requestFramePermissions": []
+}
