@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Environment, Grid } from '@react-three/drei';
@@ -9,10 +8,15 @@ import { AirfoilParams } from '../types';
 interface SceneProps {
   params: AirfoilParams;
   setParams?: React.Dispatch<React.SetStateAction<AirfoilParams>>;
+  onDragStart?: () => void;
 }
 
-const Scene: React.FC<SceneProps> = ({ params, setParams }) => {
+const Scene: React.FC<SceneProps> = ({ params, setParams, onDragStart }) => {
   const [orbitEnabled, setOrbitEnabled] = useState(true);
+
+  // Determine if flow should be paused/hidden
+  // Global Switch OFF OR (Sculpt Mode + Editing + Hide Flow Option)
+  const isFlowPaused = !params.isFlowActive || (params.mode === 'freeform' && params.isEditing && params.pauseFlowDuringEdit);
 
   return (
     <Canvas shadows dpr={[1, 2]} gl={{ antialias: true }}>
@@ -41,14 +45,18 @@ const Scene: React.FC<SceneProps> = ({ params, setParams }) => {
           params={params} 
           setParams={setParams} 
           setOrbitEnabled={setOrbitEnabled}
+          onDragStart={onDragStart}
         />
         <FlowParticles 
           angle={params.angle} 
           thickness={params.thickness} 
           flowType={params.flowType}
           showVortices={params.showVortices}
+          showHeatmap={params.showHeatmap}
           count={params.particleCount}
           speed={params.flowSpeed}
+          turbulenceIntensity={params.turbulenceIntensity}
+          paused={isFlowPaused}
         />
       </group>
 

@@ -1,4 +1,3 @@
-
 import * as THREE from 'three';
 import { Point } from '../types';
 
@@ -74,58 +73,49 @@ export const generateNACAShape = (
 
 /**
  * Generates a shape from control points.
- * Expects points to define Upper Surface then Lower Surface.
+ * Supports dynamic number of points.
+ * Assumes structure: LE -> Upper Surface Points -> TE -> Lower Surface Points
  */
 export const generateFreeformShape = (controlPoints: Point[]): THREE.Shape => {
   const shape = new THREE.Shape();
 
   if (controlPoints.length < 3) return shape;
 
-  // Split points into upper and lower surfaces
-  // Assuming standard structure: 
-  // Index 0 is Leading Edge (0,0)
-  // Last Index is Trailing Edge
-  // We need to construct curves.
+  // Dynamically find the Trailing Edge (TE) index.
+  // We assume it's the point roughly in the middle of the array.
+  // Usually LE is 0, TE is ceil(length/2) for equal points top/bottom
+  const teIndex = Math.floor(controlPoints.length / 2);
+
+  const le = new THREE.Vector2(controlPoints[0].x, controlPoints[0].y);
+  const te = new THREE.Vector2(controlPoints[teIndex].x, controlPoints[teIndex].y);
+
+  // Upper Surface: From LE (0) to TE (teIndex)
+  const upperSurfacePoints = controlPoints.slice(0, teIndex + 1).map(p => new THREE.Vector2(p.x, p.y));
   
-  // For this specific implementation, we expect:
-  // LE, Upper1, Upper2, Upper3, TE, Lower1, Lower2, Lower3
-  // But let's make it robust. We'll create a single loop or two curves.
+  // Lower Surface: From LE (0) -> Intermediates (teIndex+1 to end) -> TE (teIndex)
+  // Note: Control points for lower surface typically move from LE towards TE in X.
+  const lowerIntermediatePoints = controlPoints.slice(teIndex + 1).map(p => new THREE.Vector2(p.x, p.y));
+  const lowerSurfacePoints = [le, ...lowerIntermediatePoints, te];
   
-  // Let's assume the points are ordered: LE -> Upper Surface -> TE -> Lower Surface (back to LE conceptually)
-  
-  // To get smooth curves, we use SplineCurve (2D)
-  const vectorPoints = controlPoints.map(p => new THREE.Vector2(p.x, p.y));
-  
-  // Close the loop if needed, but usually we draw LE -> TE (Upper) then TE -> LE (Lower)
-  // Let's split the points based on our known structure in App.tsx
-  // 0: LE
-  // 1, 2, 3: Upper intermediates
-  // 4: TE
-  // 5, 6, 7: Lower intermediates
-  
-  const le = vectorPoints[0];
-  const te = vectorPoints[4];
-  
-  const upperCurvePoints = [le, vectorPoints[1], vectorPoints[2], vectorPoints[3], te];
-  const lowerCurvePoints = [le, vectorPoints[5], vectorPoints[6], vectorPoints[7], te]; // Note: Curve usually goes left to right
-  
-  const upperCurve = new THREE.SplineCurve(upperCurvePoints);
-  const lowerCurve = new THREE.SplineCurve(lowerCurvePoints);
+  const upperCurve = new THREE.SplineCurve(upperSurfacePoints);
+  const lowerCurve = new THREE.SplineCurve(lowerSurfacePoints);
   
   const divisions = 50;
   const upperSpaced = upperCurve.getPoints(divisions);
   const lowerSpaced = lowerCurve.getPoints(divisions);
   
-  // Draw Shape
-  shape.moveTo(upperSpaced[upperSpaced.length - 1].x, upperSpaced[upperSpaced.length - 1].y); // Start at TE
+  // START DRAWING
+  // Start at TE
+  shape.moveTo(upperSpaced[upperSpaced.length - 1].x, upperSpaced[upperSpaced.length - 1].y); 
   
-  // Draw Upper (backwards from TE to LE)
+  // Draw Upper Surface (backwards from TE to LE)
   for (let i = upperSpaced.length - 1; i >= 0; i--) {
     shape.lineTo(upperSpaced[i].x, upperSpaced[i].y);
   }
   
-  // Draw Lower (from LE to TE)
-  for (let i = 0; i < lowerSpaced.length; i++) {
+  // Draw Lower Surface (from LE to TE)
+  // We skip index 0 because it's LE, which we just drew to.
+  for (let i = 1; i < lowerSpaced.length; i++) {
      shape.lineTo(lowerSpaced[i].x, lowerSpaced[i].y);
   }
 

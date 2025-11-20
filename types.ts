@@ -1,3 +1,4 @@
+import React from 'react';
 
 export interface Point {
   x: number;
@@ -18,17 +19,25 @@ export interface AirfoilParams {
   // Mode Switching
   mode: 'naca' | 'freeform';
   isEditing: boolean; // Toggle for showing/hiding control points in freeform
+  pauseFlowDuringEdit: boolean; // Toggle for hiding flow particles while sculpting
+  isFlowActive: boolean; // Global master switch for the simulation
   
   // Freeform Control Points
-  // 0: LE, 1-3: Upper, 4: TE, 5-7: Lower (Simplified model)
+  // 0: LE, Middle: TE, Others: Upper/Lower surfaces
   controlPoints: Point[];
 
   // Visual Style
   flowType: 'discrete' | 'steam';
   showVortices: boolean;
   showWireframe: boolean;
+  showHeatmap: boolean; // New: Toggle heatmap coloring
   particleCount: number;
   flowSpeed: number;
+  turbulenceIntensity: number; // Scalar for wake chaos (0-3)
+
+  // AI Configuration
+  aiProvider: 'gemini' | 'local';
+  localEndpoint: string;
 }
 
 export interface Preset {
@@ -53,4 +62,43 @@ export interface AnalysisResult {
   loading: boolean;
   data?: AeroStats;
   error?: string;
+}
+
+// Fix for React Three Fiber JSX types not being automatically recognized
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      ambientLight: any;
+      boxGeometry: any;
+      group: any;
+      instancedMesh: any;
+      mesh: any;
+      meshBasicMaterial: any;
+      meshPhysicalMaterial: any;
+      meshStandardMaterial: any;
+      planeGeometry: any;
+      sphereGeometry: any;
+      spotLight: any;
+      primitive: any;
+    }
+  }
+}
+
+declare module 'react' {
+  namespace JSX {
+    interface IntrinsicElements {
+      ambientLight: any;
+      boxGeometry: any;
+      group: any;
+      instancedMesh: any;
+      mesh: any;
+      meshBasicMaterial: any;
+      meshPhysicalMaterial: any;
+      meshStandardMaterial: any;
+      planeGeometry: any;
+      sphereGeometry: any;
+      spotLight: any;
+      primitive: any;
+    }
+  }
 }
