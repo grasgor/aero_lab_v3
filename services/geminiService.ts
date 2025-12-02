@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AirfoilParams, AeroStats, Point } from "../types";
 import * as THREE from 'three';
+import { TRACK_DATA } from '../utils/tracks';
 
 let ai: GoogleGenAI | null = null;
 
@@ -32,7 +33,7 @@ const cleanJsonOutput = (text: string): string => {
   return text;
 };
 
-const generatePrompt = (params: AirfoilParams, scenario: string): string => {
+const getAirfoilDataString = (params: AirfoilParams): string => {
   const { camber, position, thickness, angle, mode } = params;
   
   let profileDescription = "";
@@ -58,53 +59,24 @@ const generatePrompt = (params: AirfoilParams, scenario: string): string => {
   }
 
   return `
-    Act as a senior Automotive Aerodynamicist. Analyze this rear spoiler configuration:
-    - Profile: ${profileDescription}
-    - Angle of Attack: ${angle} degrees.
-    - Analysis Scenario/Context: "${scenario}"
-    
-    Provide a structured analysis suitable for a professional CFD dashboard.
-    
-    Evaluate metrics:
-    1. Downforce: 0 (Lift/None) to 10 (Extreme Downforce).
-    2. Drag Efficiency: 0 (Airbrake) to 10 (Slippery).
-    3. Stability: 0 (Unstable) to 10 (Planted).
-    4. Lift-to-Drag Ratio (Estimate): A number (e.g. -2.5 for downforce dominant, 15 for glider).
-    5. Flow Complexity / Computational Cost: 0 (Laminar/Simple) to 100 (Highly Turbulent/Complex).
-    
-    Provide:
-    - "summary" (max 12 words).
-    - "recommendation" (max 8 words).
-    - "extensiveReport": A detailed paragraph (approx 60 words) explaining the boundary layer behavior, separation points, and specific suitability for racing vs street within the context of ${scenario}.
-
-    IMPORTANT: Return ONLY valid JSON. No markdown, no preamble.
-    Format:
-    {
-      "downforce": number,
-      "drag": number,
-      "stability": number,
-      "liftToDrag": number,
-      "flowComplexity": number,
-      "summary": string,
-      "recommendation": string,
-      "extensiveReport": string
-    }
+    --- Airfoil Configuration ---
+    Profile: ${profileDescription}
+    Angle of Attack: ${angle} degrees.
+    --------------------------
   `;
 };
 
-const analyzeWithLocal = async (params: AirfoilParams, scenario: string): Promise<AeroStats | null> => {
-  const prompt = generatePrompt(params, scenario);
-  
+const analyzeWithLocal = async (systemPrompt: string, userPrompt: string, endpoint: string): Promise<AeroStats | null> => {
   try {
-    const response = await fetch(params.localEndpoint, {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         messages: [
-          { role: "system", content: "You are a physics engine outputting JSON data only." },
-          { role: "user", content: prompt }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
         ],
         temperature: 0.2,
         response_format: { type: "json_object" } 
@@ -116,7 +88,7 @@ const analyzeWithLocal = async (params: AirfoilParams, scenario: string): Promis
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || data.content || "{}";
+    const content = data.choices?.[0]?.messages?.content || data.content || "{}";
     const cleaned = cleanJsonOutput(content);
     return JSON.parse(cleaned) as AeroStats;
 
@@ -126,9 +98,39 @@ const analyzeWithLocal = async (params: AirfoilParams, scenario: string): Promis
   }
 };
 
-export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "General Performance"): Promise<AeroStats | null> => {
+export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "General Performance", selectedTrack: string = "none"): Promise<AeroStats | null> => {
+  const airfoilData = getAirfoilDataString(params);
+  let userPrompt = `Analysis Scenario/Context: "${scenario}"\n\n${airfoilData}`;
+  let systemPrompt = params.systemPrompt;
+
+  const track = TRACK_DATA.find(t => t.name === selectedTrack);
+
+  if (track) {
+    userPrompt += `
+    \n--- Track Specific Analysis ---
+    Please analyze the airfoil's suitability for the following Formula 1 circuit:
+    Track: ${track.name} (${track.description})
+
+    This track has the following aerodynamic signature (0-10 scale, 10=Max demand):
+    - Straight-Line Demand (SLD): ${track.signature.sld}
+    - High-Speed Cornering Load (HSCL): ${track.signature.hscl}
+    - Low-Speed Mechanical Focus (LSMF): ${track.signature.lsmf}
+    - Aero Sensitivity / Balance Criticality (ASB): ${track.signature.asb}
+    - Ride-Height & Ground-Effect Challenge (RGC): ${track.signature.rgc}
+
+    Your task is to provide a detailed analysis of how the spoiler's characteristics would perform against these demands.
+    `;
+    
+    systemPrompt += `\n\nWhen a track is provided for analysis, you MUST include a 'trackReport' object in your JSON response. This object must contain:
+    1. 'trackName': The name of the track. It MUST be exactly '${track.name}'.
+    2. 'suitabilityScore': An overall suitability score from 0 to 10.
+    3. 'detailedAnalysis': A paragraph explaining how the airfoil's characteristics (downforce, drag, stability) align with the track's signature (SLD, HSCL, etc.) to justify the score.`;
+  } else {
+    systemPrompt += `\n\nDo not include the 'trackReport' object in your response.`;
+  }
+  
   if (params.aiProvider === 'local') {
-    return analyzeWithLocal(params, scenario);
+    return analyzeWithLocal(systemPrompt, userPrompt, params.localEndpoint);
   }
 
   if (!ai) {
@@ -136,28 +138,42 @@ export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "
     return null;
   }
 
-  const prompt = generatePrompt(params, scenario);
-
   try {
+    const responseSchema: any = {
+      type: Type.OBJECT,
+      properties: {
+        downforce: { type: Type.NUMBER },
+        drag: { type: Type.NUMBER },
+        stability: { type: Type.NUMBER },
+        liftToDrag: { type: Type.NUMBER },
+        flowComplexity: { type: Type.NUMBER },
+        summary: { type: Type.STRING },
+        recommendation: { type: Type.STRING },
+        extensiveReport: { type: Type.STRING },
+      },
+      required: ["downforce", "drag", "stability", "liftToDrag", "flowComplexity", "summary", "recommendation", "extensiveReport"]
+    };
+
+    if (track) {
+      responseSchema.properties.trackReport = {
+        type: Type.OBJECT,
+        properties: {
+          trackName: { type: Type.STRING },
+          suitabilityScore: { type: Type.NUMBER },
+          detailedAnalysis: { type: Type.STRING }
+        },
+        required: ["trackName", "suitabilityScore", "detailedAnalysis"]
+      };
+      responseSchema.required.push("trackReport");
+    }
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: userPrompt,
       config: {
+        systemInstruction: systemPrompt,
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            downforce: { type: Type.NUMBER },
-            drag: { type: Type.NUMBER },
-            stability: { type: Type.NUMBER },
-            liftToDrag: { type: Type.NUMBER },
-            flowComplexity: { type: Type.NUMBER },
-            summary: { type: Type.STRING },
-            recommendation: { type: Type.STRING },
-            extensiveReport: { type: Type.STRING }
-          },
-          required: ["downforce", "drag", "stability", "liftToDrag", "flowComplexity", "summary", "recommendation", "extensiveReport"]
-        },
+        responseSchema: responseSchema,
         thinkingConfig: { thinkingBudget: 0 }
       }
     });
@@ -174,7 +190,7 @@ export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "
 
 export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Promise<Partial<AirfoilParams> | null> => {
     const prompt = `
-      Act as an Aerodynamic Engineer. The user wants to configure a vehicle spoiler to achieve the following goal:
+      The user wants to configure a vehicle spoiler to achieve the following goal:
       "${goal}"
 
       Return a JSON object with the optimal parameter values to achieve this. 
@@ -195,7 +211,7 @@ export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Prom
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: [
-                        { role: "system", content: "You are a configuration assistant. Output JSON only. No Markdown." },
+                        { role: "system", content: `${params.nacaDesignSystemPrompt}. You must output JSON. No Markdown.` },
                         { role: "user", content: prompt }
                     ],
                     temperature: 0.5,
@@ -204,7 +220,7 @@ export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Prom
             });
             if (!response.ok) throw new Error("Local AI failed");
             const data = await response.json();
-            const content = cleanJsonOutput(data.choices?.[0]?.message?.content || "{}");
+            const content = cleanJsonOutput(data.choices?.[0]?.messages?.content || "{}");
             return JSON.parse(content);
         } else {
             if (!ai) return null;
@@ -212,6 +228,7 @@ export const optimizeAirfoil = async (goal: string, params: AirfoilParams): Prom
                 model: 'gemini-2.5-flash',
                 contents: prompt,
                 config: {
+                    systemInstruction: params.nacaDesignSystemPrompt,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.OBJECT,
@@ -265,7 +282,7 @@ export const generateProfilePoints = async (description: string, params: Airfoil
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     messages: [
-                        { role: "system", content: "You are a geometry engine. Output JSON object with upperSurface and lowerSurface arrays." },
+                        { role: "system", content: `${params.freeformDesignSystemPrompt}. You are a geometry engine. Output JSON object with upperSurface and lowerSurface arrays.` },
                         { role: "user", content: prompt }
                     ],
                     temperature: 0.5,
@@ -273,7 +290,7 @@ export const generateProfilePoints = async (description: string, params: Airfoil
                 })
             });
             const data = await response.json();
-            const content = cleanJsonOutput(data.choices?.[0]?.message?.content || "{}");
+            const content = cleanJsonOutput(data.choices?.[0]?.messages?.content || "{}");
             rawData = JSON.parse(content);
         } else {
             if (!ai) return null;
@@ -281,6 +298,7 @@ export const generateProfilePoints = async (description: string, params: Airfoil
                 model: 'gemini-2.5-flash',
                 contents: prompt,
                 config: {
+                    systemInstruction: params.freeformDesignSystemPrompt,
                     responseMimeType: "application/json",
                     responseSchema: {
                         type: Type.OBJECT,
@@ -311,47 +329,28 @@ export const generateProfilePoints = async (description: string, params: Airfoil
 
         if (rawData && rawData.upperSurface && rawData.lowerSurface) {
             // Interpolation Logic
-            // 1. Create separate spline curves for upper and lower
             const le = new THREE.Vector2(0, 0);
-            // Determine TE Y from the last points of generated data or default to 0
             const lastUpper = rawData.upperSurface[rawData.upperSurface.length - 1];
             const lastLower = rawData.lowerSurface[rawData.lowerSurface.length - 1];
             const teY = (lastUpper.y + lastLower.y) / 2;
             const te = new THREE.Vector2(1, teY);
-
-            // Build arrays for SplineCurve
             const upperVecs = [le, ...rawData.upperSurface.map(p => new THREE.Vector2(p.x, p.y)), te];
-            // For lower surface, typically we want LE -> TE direction for the spline
             const lowerVecs = [le, ...rawData.lowerSurface.map(p => new THREE.Vector2(p.x, p.y)), te];
-
             const upperSpline = new THREE.SplineCurve(upperVecs);
             const lowerSpline = new THREE.SplineCurve(lowerVecs);
-
-            // We need 12 points total to match App defaults.
-            // 0: LE
-            // 1-5: Upper intermediates (5 points)
-            // 6: TE
-            // 7-11: Lower intermediates (5 points)
-
             const finalPoints: Point[] = [];
             finalPoints.push({ x: 0, y: 0 }); // Index 0: LE
-
-            // Sample Upper (t=0 is LE, t=1 is TE)
             for (let i = 1; i <= 5; i++) {
                 const t = i / 6;
                 const p = upperSpline.getPoint(t);
                 finalPoints.push({ x: p.x, y: p.y });
             }
-
             finalPoints.push({ x: 1, y: teY }); // Index 6: TE
-
-            // Sample Lower (t=0 is LE, t=1 is TE)
             for (let i = 1; i <= 5; i++) {
                 const t = i / 6;
                 const p = lowerSpline.getPoint(t);
                 finalPoints.push({ x: p.x, y: p.y });
             }
-
             return finalPoints;
         }
         return null;

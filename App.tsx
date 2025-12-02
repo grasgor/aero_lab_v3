@@ -19,6 +19,27 @@ const DEFAULT_POINTS = [
   { x: 0.90, y: -0.02 } // 11
 ];
 
+const DEFAULT_SYSTEM_PROMPT = `Act as a senior Automotive Aerodynamicist. Analyze the provided rear spoiler configuration and scenario.
+
+Provide a structured analysis in JSON format suitable for a professional CFD dashboard.
+
+Evaluate the following metrics on a 0-10 scale (unless specified otherwise):
+- downforce: 0 (None) to 10 (Extreme).
+- drag: 0 (Airbrake) to 10 (Slippery).
+- stability: 0 (Unstable) to 10 (Planted).
+- liftToDrag: A numerical ratio.
+- flowComplexity: 0 (Laminar) to 100 (Complex).
+
+Provide concise text fields:
+- summary: Max 12 words.
+- recommendation: Max 8 words.
+- extensiveReport: A detailed paragraph (approx 60 words) on boundary layer, separation, and suitability for the user's scenario.
+
+Return ONLY the JSON object. No markdown, no preamble.`;
+
+const DEFAULT_NACA_DESIGN_PROMPT = `Act as an Aerodynamic Engineer. The user wants to configure a vehicle spoiler to achieve a specific goal. Your task is to return the optimal parameter values for a NACA 4-digit airfoil. Focus ONLY on the parameters 'camber', 'position', 'thickness', and 'angle'.`;
+const DEFAULT_FREEFORM_DESIGN_PROMPT = `Act as a senior F1 Aerodynamicist. Generate the key geometric points for a car spoiler cross-section based on the user's description. You need to define the Upper (Suction) and Lower (Pressure) surfaces separately using 4-6 keypoints each.`;
+
 // Default: NACA 4412 inverted (roughly) or just negative angle for downforce
 const DEFAULT_PARAMS: AirfoilParams = {
   camber: 4,
@@ -40,7 +61,10 @@ const DEFAULT_PARAMS: AirfoilParams = {
   flowSpeed: 0.15,
   turbulenceIntensity: 1.0,
   aiProvider: 'gemini',
-  localEndpoint: 'http://localhost:8080/v1/chat/completions'
+  localEndpoint: 'http://localhost:3001/v1/chat/completions',
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  nacaDesignSystemPrompt: DEFAULT_NACA_DESIGN_PROMPT,
+  freeformDesignSystemPrompt: DEFAULT_FREEFORM_DESIGN_PROMPT,
 };
 
 const App: React.FC = () => {
@@ -185,9 +209,11 @@ const App: React.FC = () => {
         onReset={handleReset}
         canUndo={history.length > 0}
         saveHistory={saveHistory}
-        // Mesh Tools
         onSubdivide={handleSubdivide}
         onSmooth={handleSmooth}
+        defaultSystemPrompt={DEFAULT_SYSTEM_PROMPT}
+        defaultNacaSystemPrompt={DEFAULT_NACA_DESIGN_PROMPT}
+        defaultFreeformSystemPrompt={DEFAULT_FREEFORM_DESIGN_PROMPT}
       />
       
       <Scene 

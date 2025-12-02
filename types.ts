@@ -1,4 +1,7 @@
-import React from 'react';
+// FIX: Changed type-only import to a regular import to ensure the JSX namespace is extended correctly for React Three Fiber components.
+// FIX: Replaced unused React import with a side-effect import for react-three-fiber to correctly extend the JSX namespace.
+import '@react-three/fiber';
+import { ThreeElements } from '@react-three/fiber';
 
 export interface Point {
   x: number;
@@ -38,6 +41,9 @@ export interface AirfoilParams {
   // AI Configuration
   aiProvider: 'gemini' | 'local';
   localEndpoint: string;
+  systemPrompt: string; // AI system prompt for analysis
+  nacaDesignSystemPrompt: string;
+  freeformDesignSystemPrompt: string;
 }
 
 export interface Preset {
@@ -56,6 +62,11 @@ export interface AeroStats {
   summary: string;
   recommendation: string;
   extensiveReport: string; // Detailed analysis text
+  trackReport?: { // Optional object for detailed track analysis
+    trackName: string;
+    suitabilityScore: number;
+    detailedAnalysis: string;
+  }
 }
 
 export interface AnalysisResult {
@@ -64,24 +75,9 @@ export interface AnalysisResult {
   error?: string;
 }
 
-// Fix for React Three Fiber JSX types not being automatically recognized
+// Extends JSX to include React Three Fiber's intrinsic elements.
 declare global {
   namespace JSX {
-    interface IntrinsicElements {
-      ambientLight: any;
-      boxGeometry: any;
-      group: any;
-      instancedMesh: any;
-      mesh: any;
-      meshBasicMaterial: any;
-      meshPhysicalMaterial: any;
-      meshStandardMaterial: any;
-      planeGeometry: any;
-      sphereGeometry: any;
-      spotLight: any;
-      primitive: any;
-      // Fallback for standard HTML elements (div, span, etc.)
-      [elemName: string]: any;
-    }
+    interface IntrinsicElements extends ThreeElements {}
   }
 }
