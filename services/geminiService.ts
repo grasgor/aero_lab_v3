@@ -68,35 +68,73 @@ const getAirfoilDataString = (params: AirfoilParams): string => {
 
 const analyzeWithLocal = async (systemPrompt: string, userPrompt: string, endpoint: string): Promise<AeroStats | null> => {
   try {
+    console.log("%c[LLM-LOCAL] Sending request...", "color: cyan; font-weight: bold;");
+    console.log("[LLM-LOCAL] System prompt:", systemPrompt);
+    console.log("[LLM-LOCAL] User prompt:", userPrompt);
+
     const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
         temperature: 0.2,
-        response_format: { type: "json_object" } 
+        response_format: { type: "json_object" }
       })
     });
 
+    console.log("%c[LLM-LOCAL] HTTP status: " + response.status, "color: cyan;");
+
     if (!response.ok) {
+      console.error("[LLM-LOCAL] ERROR: Server responded with non-OK:", response.status);
       throw new Error(`Local server error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.choices?.[0]?.messages?.content || data.content || "{}";
-    const cleaned = cleanJsonOutput(content);
-    return JSON.parse(cleaned) as AeroStats;
 
+    console.log("%c[LLM-LOCAL] RAW full response:", "color: yellow; font-weight: bold;", data);
+
+    const content =
+      data.choices?.[0]?.messages?.content ||
+      data.choices?.[0]?.message?.content ||
+      data.content ||
+      "{}";
+
+    console.log("%c[LLM-LOCAL] Extracted content:", "color: yellow;", content);
+
+    const cleaned = cleanJsonOutput(content);
+    console.log("%c[LLM-LOCAL] Cleaned JSON:", "color: orange; font-weight:bold;", cleaned);
+
+    let parsed: AeroStats | null = null;
+
+    try {
+      parsed = JSON.parse(cleaned);
+      console.log("%c[LLM-LOCAL] Parsed object:", "color: lightgreen; font-weight:bold;", parsed);
+    } catch (err) {
+      console.error("%c[LLM-LOCAL] JSON parse error:", "color: red; font-weight:bold;", err);
+      return null;
+    }
+
+    // Highlight aerodynamic + track report content
+    if (parsed && (parsed as any).trackReport) {
+      console.log(
+        "%c[TRACK REPORT FOUND]",
+        "color: violet; font-weight:bold; font-size: 14px;"
+      );
+      console.table((parsed as any).trackReport);
+    } else {
+      console.log("%c[NO TRACK REPORT]", "color: gray;");
+    }
+
+    return parsed;
   } catch (e) {
-    console.error("Local AI Error:", e);
+    console.error("%c[LLM-LOCAL] ERROR:", "color: red; font-weight:bold;", e);
     return null;
   }
 };
+
 
 export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "General Performance", selectedTrack: string = "none"): Promise<AeroStats | null> => {
   const airfoilData = getAirfoilDataString(params);
@@ -130,8 +168,38 @@ export const analyzeAirfoil = async (params: AirfoilParams, scenario: string = "
   }
   
   if (params.aiProvider === 'local') {
-    return analyzeWithLocal(systemPrompt, userPrompt, params.localEndpoint);
+  // FORCE COMPLETE AEROSTATS SCHEMA
+  systemPrompt += `
+  
+  You MUST ALWAYS output a full AeroStats JSON object with the following exact fields:
+
+  {
+    "downforce": number,
+    "drag": number,
+    "stability": number,
+    "liftToDrag": number,
+    "flowComplexity": number,
+    "summary": string,
+    "recommendation": string,
+    "extensiveReport": string
   }
+
+  If a track is provided, ALSO include:
+
+  "trackReport": {
+    "trackName": string,
+    "suitabilityScore": number,
+    "detailedAnalysis": string
+  }
+
+  These fields are mandatory. Never omit them.
+  Never output markdown.
+  Never output analysis outside JSON.
+  `;
+
+  return analyzeWithLocal(systemPrompt, userPrompt, params.localEndpoint);
+}
+
 
   if (!ai) {
     console.error("API Key not configured for Gemini.");
